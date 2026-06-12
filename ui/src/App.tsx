@@ -53,14 +53,42 @@ const TOOLS: ToolDef[] = [
   { id: 'compare', title: 'Compare', desc: 'Diff two PDFs', icon: <Eye size={18} />, section: 'Edit & Security' },
 ];
 
-const TOOL_REQUIRES: Partial<Record<ToolType, string>> = {
-  compress: 'gs',
-  pdfa: 'gs',
-  ocr: 'tesseract',
-  office_convert: 'libreoffice',
-  pdf_to_text: 'pdftotext',
-  pdf_to_images: 'pdftoppm',
+// Any one of the listed binaries satisfies the requirement
+const TOOL_REQUIRES: Partial<Record<ToolType, string[]>> = {
+  pdfa: ['gs'],
+  ocr: ['tesseract'],
+  office_convert: ['soffice', 'libreoffice'],
+  pdf_to_text: ['pdftotext'],
+  pdf_to_images: ['pdftoppm'],
 };
+
+function validateOptions(tool: ToolType, opts: Record<string, string>, fileCount: number): string | null {
+  const req = (key: string, label: string) => {
+    if (!opts[key]?.trim()) return label;
+    return null;
+  };
+  switch (tool) {
+    case 'reorder':
+      if (!opts.page_seq?.trim() && !opts.pages?.trim()) return 'Enter page order (e.g. 3,1,2)';
+      break;
+    case 'delete_pages':
+    case 'extract_pages':
+      return req('pages', 'Enter pages (e.g. 1,3,4-6)');
+    case 'watermark':
+      if (!opts.text?.trim()) return 'Enter watermark text';
+      break;
+    case 'protect':
+      return req('user_password', 'Enter a password');
+    case 'unlock':
+      return req('password', 'Enter the current password');
+    case 'fill_form':
+      return req('fields', 'Enter form fields (e.g. name=John)');
+    case 'compare':
+      if (fileCount < 2) return 'Select exactly 2 PDF files to compare';
+      break;
+  }
+  return null;
+}
 
 export const App: React.FC = () => {
   const [activeTool, setActiveTool] = useState<ToolType>('merge');
@@ -71,13 +99,28 @@ export const App: React.FC = () => {
   const [options, setOptions] = useState<Record<string, string>>({});
   const [toolSearch, setToolSearch] = useState('');
   const [systemTools, setSystemTools] = useState<SystemTool[]>([]);
+  const [installHint, setInstallHint] = useState('sudo ./install_deps.sh');
 
   useEffect(() => {
     fetch('/api/system/status')
       .then((r) => r.json())
-      .then((data) => setSystemTools(data.tools || []))
+      .then((data) => {
+        setSystemTools(data.tools || []);
+        if (data.install_hint) setInstallHint(data.install_hint);
+      })
       .catch(() => {});
   }, []);
+
+  const missingTools = useMemo(() => {
+    const core = ['gs', 'pdftotext', 'pdftoppm', 'tesseract', 'soffice'];
+    return core.filter((name) => {
+      const t = systemTools.find((x) => x.name === name);
+      if (name === 'soffice') {
+        return !systemTools.some((x) => (x.name === 'soffice' || x.name === 'libreoffice') && x.available);
+      }
+      return t && !t.available;
+    });
+  }, [systemTools]);
 
   useEffect(() => {
     const eventSource = new EventSource('/api/jobs/stream');
@@ -100,8 +143,8 @@ export const App: React.FC = () => {
   const isToolAvailable = (tool: ToolType): boolean => {
     const required = TOOL_REQUIRES[tool];
     if (!required) return true;
-    const found = systemTools.find((t) => t.name === required);
-    return found?.available ?? true;
+    if (systemTools.length === 0) return true;
+    return required.some((name) => systemTools.find((t) => t.name === name)?.available);
   };
 
   const handleToolChange = (tool: ToolType) => {
@@ -112,8 +155,16 @@ export const App: React.FC = () => {
 
   const handleProcess = async () => {
     if (selectedFiles.length === 0) return;
+
+    const optErr = validateOptions(activeTool, options, selectedFiles.length);
+    if (optErr) {
+      showToast(optErr);
+      return;
+    }
+
     if (!isToolAvailable(activeTool)) {
-      showToast(`This tool requires ${TOOL_REQUIRES[activeTool]} — not installed on server`);
+      const deps = TOOL_REQUIRES[activeTool]?.join(' or ') || 'additional software';
+      showToast(`${deps} not installed — run: ${installHint}`);
       return;
     }
 
@@ -186,7 +237,9 @@ export const App: React.FC = () => {
 
   const metadata = getToolMetadata();
   const toolReady = isToolAvailable(activeTool);
-  const missingDep = TOOL_REQUIRES[activeTool];
+  const optionsValid = !validateOptions(activeTool, options, selectedFiles.length);
+  const canSubmit = selectedFiles.length > 0 && !isUploading && toolReady &&
+    (!(metadata as { hasOptions?: boolean }).hasOptions || optionsValid);
 
   const setOpt = (key: string, value: string) =>
     setOptions((prev) => ({ ...prev, [key]: value }));
@@ -206,9 +259,9 @@ export const App: React.FC = () => {
           <span className="brand-badge">local</span>
         </div>
         <div className="system-status">
-          <div className={`status-indicator ${toolReady ? '' : 'warn'}`}>
-            <span className={`dot ${toolReady ? 'green' : 'amber'}`} />
-            <span>{toolReady ? 'Engine Ready' : `${missingDep} not installed`}</span>
+          <div className={`status-indicator ${missingTools.length === 0 ? '' : 'warn'}`}>
+            <span className={`dot ${missingTools.length === 0 ? 'green' : 'amber'}`} />
+            <span>{missingTools.length === 0 ? 'All engines ready' : `${missingTools.length} dependency missing`}</span>
           </div>
           <div className="status-indicator">
             <ShieldCheck size={14} style={{ color: 'var(--green-600)' }} />
@@ -216,6 +269,13 @@ export const App: React.FC = () => {
           </div>
         </div>
       </header>
+
+      {missingTools.length > 0 && (
+        <div className="deps-banner">
+          <strong>Missing system tools:</strong> {missingTools.join(', ')}.
+          Install with <code>{installHint}</code> then restart the server.
+        </div>
+      )}
 
       <main className="app-workspace">
         <aside className="tools-sidebar">
@@ -297,11 +357,11 @@ export const App: React.FC = () => {
                 )}
 
                 {activeTool === 'reorder' && (
-                  <input className="form-input" type="text" placeholder="Page order, e.g. 3,1,2" onChange={(e) => setOpt('page_seq', e.target.value)} />
+                  <input className="form-input" type="text" required placeholder="Page order, e.g. 3,1,2 *" value={options.page_seq || ''} onChange={(e) => setOpt('page_seq', e.target.value)} />
                 )}
 
                 {['delete_pages', 'extract_pages'].includes(activeTool) && (
-                  <input className="form-input" type="text" placeholder="Pages, e.g. 1,3,4-6" onChange={(e) => setOpt('pages', e.target.value)} />
+                  <input className="form-input" type="text" required placeholder="Pages, e.g. 1,3,4-6 *" value={options.pages || ''} onChange={(e) => setOpt('pages', e.target.value)} />
                 )}
 
                 {activeTool === 'rotate' && (
@@ -317,8 +377,8 @@ export const App: React.FC = () => {
 
                 {activeTool === 'watermark' && (
                   <>
-                    <input className="form-input" type="text" placeholder="Watermark text" onChange={(e) => setOpt('text', e.target.value)} />
-                    <input className="form-input" type="text" placeholder="Color, e.g. #16a34a or 0.1 0.6 0.3" onChange={(e) => setOpt('color', e.target.value)} />
+                    <input className="form-input" type="text" required placeholder="Watermark text *" value={options.text || ''} onChange={(e) => setOpt('text', e.target.value)} />
+                    <input className="form-input" type="text" placeholder="Color, e.g. #16a34a (optional)" value={options.color || ''} onChange={(e) => setOpt('color', e.target.value)} />
                   </>
                 )}
 
@@ -345,24 +405,28 @@ export const App: React.FC = () => {
                 )}
 
                 {activeTool === 'protect' && (
-                  <input className="form-input" type="password" placeholder="User password" onChange={(e) => setOpt('user_password', e.target.value)} />
+                  <input className="form-input" type="password" required placeholder="User password *" value={options.user_password || ''} onChange={(e) => setOpt('user_password', e.target.value)} />
                 )}
 
                 {activeTool === 'unlock' && (
-                  <input className="form-input" type="password" placeholder="Current password" onChange={(e) => setOpt('password', e.target.value)} />
+                  <input className="form-input" type="password" required placeholder="Current password *" value={options.password || ''} onChange={(e) => setOpt('password', e.target.value)} />
                 )}
 
                 {activeTool === 'fill_form' && (
-                  <input className="form-input" type="text" placeholder="Fields, e.g. name=John,email=test@example.com" onChange={(e) => setOpt('fields', e.target.value)} />
+                  <input className="form-input" type="text" required placeholder="Fields, e.g. name=John,email=test@example.com *" value={options.fields || ''} onChange={(e) => setOpt('fields', e.target.value)} />
                 )}
               </div>
+            )}
+
+            {!toolReady && TOOL_REQUIRES[activeTool] && (
+              <p className="tool-warning">Requires {TOOL_REQUIRES[activeTool]!.join(' or ')}. Run <code>{installHint}</code> on the server.</p>
             )}
 
             <div className="panel-actions">
               <button
                 className="btn-primary"
                 onClick={handleProcess}
-                disabled={selectedFiles.length === 0 || isUploading || !toolReady}
+                disabled={!canSubmit}
               >
                 {isUploading ? 'Processing…' : (
                   <>Run {metadata.title} <ArrowRight size={16} /></>

@@ -61,16 +61,34 @@ func main() {
 
 	// Proactively check dependencies
 	log.Println("[Init] Probing system dependencies...")
-	if ver, ok := ocr.CheckTesseractVersion(); ok {
-		log.Printf("[Init]   - OCR Engine: Tesseract OCR available (%s)\n", ver)
-	} else {
-		log.Println("[Init]   - OCR Engine: Tesseract OCR NOT found on path. OCR features will fail.")
+	logDependency := func(name string, ok bool, detail string) {
+		if ok {
+			log.Printf("[Init]   ✓ %s — %s", name, detail)
+		} else {
+			log.Printf("[Init]   ✗ %s — NOT installed (run: sudo ./install_deps.sh)", name)
+		}
 	}
-
-	if ver, ok := office.CheckLibreOfficeVersion(); ok {
-		log.Printf("[Init]   - Office Engine: LibreOffice available (%s)\n", ver)
+	if ver, ok := ocr.CheckTesseractVersion(); ok {
+		logDependency("Tesseract OCR", true, ver)
 	} else {
-		log.Println("[Init]   - Office Engine: LibreOffice NOT found on path. Office conversions will fail.")
+		logDependency("Tesseract OCR", false, "")
+	}
+	if ver, ok := office.CheckLibreOfficeVersion(); ok {
+		logDependency("LibreOffice", true, ver)
+	} else {
+		logDependency("LibreOffice", false, "")
+	}
+	for _, t := range engine.ProbeAllTools() {
+		if t.Name == "tesseract" || t.Name == "soffice" || t.Name == "libreoffice" {
+			continue
+		}
+		if t.Available {
+			log.Printf("[Init]   ✓ %s", t.Name)
+		} else if t.Name == "gs" {
+			log.Printf("[Init]   ✗ %s — NOT installed (compress will use pdfcpu fallback; run: sudo ./install_deps.sh)", t.Name)
+		} else {
+			log.Printf("[Init]   ✗ %s — NOT installed (run: sudo ./install_deps.sh)", t.Name)
+		}
 	}
 
 	// 2. Initialize Queue and Store

@@ -142,7 +142,10 @@ func (e *GoPDFEngine) Split(ctx context.Context, inputPath string, outputDir str
 // ---------------------------------------------------------------------------
 
 func (e *GoPDFEngine) ReorderPages(ctx context.Context, inputPath, outputPath, pageSeq string) error {
-	pages := strings.Split(pageSeq, ",")
+	pages, err := engine.ParsePageSelection(pageSeq)
+	if err != nil {
+		return err
+	}
 	ch := make(chan error, 1)
 	go func() {
 		ch <- pdfcpuapi.CollectFile(inputPath, outputPath, pages, relaxed())
@@ -171,7 +174,10 @@ func (e *GoPDFEngine) DeletePages(ctx context.Context, inputPath, outputPath, pa
 	if err := os.WriteFile(outputPath, data, 0644); err != nil {
 		return fmt.Errorf("write output: %w", err)
 	}
-	pages := strings.Split(pageRanges, ",")
+	pages, err := engine.ParsePageSelection(pageRanges)
+	if err != nil {
+		return err
+	}
 	ch := make(chan error, 1)
 	go func() {
 		ch <- pdfcpuapi.RemovePagesFile(outputPath, "", pages, relaxed())
@@ -192,7 +198,10 @@ func (e *GoPDFEngine) DeletePages(ctx context.Context, inputPath, outputPath, pa
 // ---------------------------------------------------------------------------
 
 func (e *GoPDFEngine) ExtractPages(ctx context.Context, inputPath, outputPath, pageRanges string) error {
-	pages := strings.Split(pageRanges, ",")
+	pages, err := engine.ParsePageSelection(pageRanges)
+	if err != nil {
+		return err
+	}
 	ch := make(chan error, 1)
 	go func() {
 		ch <- pdfcpuapi.CollectFile(inputPath, outputPath, pages, relaxed())
@@ -245,7 +254,18 @@ func (e *GoPDFEngine) Rotate(ctx context.Context, inputPath, outputPath string, 
 
 func (e *GoPDFEngine) Compress(ctx context.Context, inputPath, outputPath string, profile engine.CompressionProfile) error {
 	if err := requireBinary("gs"); err != nil {
-		return err
+		// Fallback: pdfcpu optimize when Ghostscript is unavailable
+		ch := make(chan error, 1)
+		go func() { ch <- pdfcpuapi.OptimizeFile(inputPath, outputPath, relaxed()) }()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case optErr := <-ch:
+			if optErr != nil {
+				return fmt.Errorf("compress failed (install ghostscript for better results): %w", optErr)
+			}
+			return nil
+		}
 	}
 	var setting string
 	switch profile {

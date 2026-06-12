@@ -57,15 +57,11 @@ func (p *WorkerPool) workerLoop() {
 		case engine.JobSplit:
 			_, err = p.pdf.Split(ctx, job.InputFiles[0], job.OutputFile)
 		case engine.JobReorder:
-			pageSeq := meta["page_seq"]
-			if pageSeq == "" {
-				pageSeq = meta["pages"]
-			}
-			err = p.pdf.ReorderPages(ctx, job.InputFiles[0], job.OutputFile, pageSeq)
+			err = p.pdf.ReorderPages(ctx, job.InputFiles[0], job.OutputFile, engine.PageSeqFromMeta(meta))
 		case engine.JobDeletePages:
-			err = p.pdf.DeletePages(ctx, job.InputFiles[0], job.OutputFile, meta["pages"])
+			err = p.pdf.DeletePages(ctx, job.InputFiles[0], job.OutputFile, engine.PageSeqFromMeta(meta))
 		case engine.JobExtractPages:
-			err = p.pdf.ExtractPages(ctx, job.InputFiles[0], job.OutputFile, meta["pages"])
+			err = p.pdf.ExtractPages(ctx, job.InputFiles[0], job.OutputFile, engine.PageSeqFromMeta(meta))
 		case engine.JobRotate:
 			deg := 90
 			if d := meta["degrees"]; d != "" {

@@ -21,7 +21,9 @@ apt-get upgrade -y
 # 2. Install core C/C++ engine dependencies and reverse proxy packages
 apt-get install -y \
     tesseract-ocr \
-    libreoffice \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
     poppler-utils \
     ghostscript \
     nginx \

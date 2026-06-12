@@ -16,7 +16,6 @@ import (
 	"sovereign-pdf/internal/engine"
 	"sovereign-pdf/internal/engine/ocr"
 	"sovereign-pdf/internal/engine/office"
-	"sovereign-pdf/internal/engine/pdf"
 	"sovereign-pdf/internal/worker"
 )
 
@@ -141,6 +140,21 @@ func (h *Handler) HandleSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := engine.ValidateJobMetadata(jobType, meta, len(inputPaths)); err != nil {
+		for _, f := range inputPaths {
+			_ = os.Remove(f)
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := engine.ValidateJobRequirements(jobType); err != nil {
+		for _, f := range inputPaths {
+			_ = os.Remove(f)
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Determine output path based on job type
 	var outputPath string
 	switch jobType {
@@ -180,27 +194,43 @@ func (h *Handler) HandleSubmit(w http.ResponseWriter, r *http.Request) {
 
 // HandleSystemStatus: GET /api/system/status
 func (h *Handler) HandleSystemStatus(w http.ResponseWriter, r *http.Request) {
-	tools := pdf.ProbeTools()
-	_, tesseractOK := ocr.CheckTesseractVersion()
-	_, libreOfficeOK := office.CheckLibreOfficeVersion()
-
 	type toolStatus struct {
 		Name      string `json:"name"`
 		Available bool   `json:"available"`
 		Version   string `json:"version,omitempty"`
 	}
-	status := make([]toolStatus, 0, len(tools)+2)
-	for _, t := range tools {
-		status = append(status, toolStatus{Name: t.Tool, Available: t.Available, Version: t.Version})
+
+	status := make([]toolStatus, 0, 8)
+	add := func(name string, ok bool, version string) {
+		status = append(status, toolStatus{Name: name, Available: ok, Version: version})
 	}
-	tVer, _ := ocr.CheckTesseractVersion()
-	loVer, _ := office.CheckLibreOfficeVersion()
-	status = append(status, toolStatus{Name: "tesseract", Available: tesseractOK, Version: tVer})
-	status = append(status, toolStatus{Name: "libreoffice", Available: libreOfficeOK, Version: loVer})
+
+	for _, t := range engine.ProbeAllTools() {
+		add(t.Name, t.Available, "")
+	}
+	if ver, ok := ocr.CheckTesseractVersion(); ok {
+		add("tesseract", true, ver)
+	}
+	if ver, ok := office.CheckLibreOfficeVersion(); ok {
+		add("libreoffice", true, ver)
+	}
+
+	allOK := true
+	for _, t := range status {
+		if !t.Available && t.Name != "libreoffice" { // libreoffice/soffice overlap
+			allOK = false
+			break
+		}
+	}
+	if !engine.IsToolAvailable("soffice") && !engine.IsToolAvailable("libreoffice") {
+		allOK = false
+	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"status": "ok",
-		"tools":  status,
+		"status":       "ok",
+		"ready":        allOK,
+		"tools":        status,
+		"install_hint": "sudo ./install_deps.sh",
 	})
 }
 
