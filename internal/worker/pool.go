@@ -57,7 +57,11 @@ func (p *WorkerPool) workerLoop() {
 		case engine.JobSplit:
 			_, err = p.pdf.Split(ctx, job.InputFiles[0], job.OutputFile)
 		case engine.JobReorder:
-			err = p.pdf.ReorderPages(ctx, job.InputFiles[0], job.OutputFile, meta["page_seq"])
+			pageSeq := meta["page_seq"]
+			if pageSeq == "" {
+				pageSeq = meta["pages"]
+			}
+			err = p.pdf.ReorderPages(ctx, job.InputFiles[0], job.OutputFile, pageSeq)
 		case engine.JobDeletePages:
 			err = p.pdf.DeletePages(ctx, job.InputFiles[0], job.OutputFile, meta["pages"])
 		case engine.JobExtractPages:
@@ -105,7 +109,15 @@ func (p *WorkerPool) workerLoop() {
 
 		// OCR
 		case engine.JobOCR:
-			err = p.ocr.CreateSearchablePDF(ctx, job.InputFiles[0], job.OutputFile)
+			if meta["format"] == "txt" {
+				var text string
+				text, err = p.ocr.ExtractText(ctx, job.InputFiles[0])
+				if err == nil {
+					err = os.WriteFile(job.OutputFile, []byte(text), 0644)
+				}
+			} else {
+				err = p.ocr.CreateSearchablePDF(ctx, job.InputFiles[0], job.OutputFile)
+			}
 
 		// Edit & Layout
 		case engine.JobWatermark:

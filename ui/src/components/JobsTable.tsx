@@ -1,46 +1,51 @@
 import React from 'react';
-import { ShieldCheck, Loader2 } from 'lucide-react';
+import { ListChecks, Loader2 } from 'lucide-react';
 import { JobRow, Job } from './JobRow';
 
 interface JobsTableProps {
   jobs: Job[];
   loading: boolean;
-  onCopyText: (text: string) => void;
 }
 
-export const JobsTable: React.FC<JobsTableProps> = ({ jobs, loading, onCopyText }) => {
+export const JobsTable: React.FC<JobsTableProps> = ({ jobs, loading }) => {
   return (
     <div className="glass-panel" style={{ overflow: 'hidden', padding: '24px 0' }}>
-      <div style={{ padding: '0 24px 16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="jobs-tracker-header">
         <h3 className="section-title">
-          <ShieldCheck size={20} className="text-teal" style={{ color: 'var(--accent-teal)' }} />
-          Private Task Processing History
+          <ListChecks size={20} style={{ color: 'var(--green-600)' }} />
+          Processing History
         </h3>
-        {loading && <Loader2 size={16} className="animated" style={{ animation: 'spin 1.5s infinite linear' }} />}
+        {loading && (
+          <Loader2 size={16} style={{ animation: 'spin 1.5s infinite linear', color: 'var(--green-600)' }} />
+        )}
       </div>
-      
+
       {jobs.length === 0 ? (
         <div className="empty-state">
-          <ShieldCheck size={36} className="empty-state-icon" style={{ color: 'var(--text-muted)' }} />
-          <p style={{ fontWeight: 500, fontSize: '14px', marginBottom: '4px' }}>No active background tasks</p>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Any documents processed will appear here in real-time. No files leave this system.</p>
+          <ListChecks size={40} className="empty-state-icon" />
+          <p style={{ fontWeight: 500, fontSize: '14px', marginBottom: '4px', color: 'var(--text-secondary)' }}>
+            No tasks yet
+          </p>
+          <p style={{ fontSize: '12px' }}>
+            Upload a file and run a tool — results appear here in real time.
+          </p>
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
           <table className="jobs-table">
             <thead>
               <tr>
-                <th style={{ width: '80px' }}>Task ID</th>
+                <th style={{ width: '80px' }}>ID</th>
                 <th>Operation</th>
-                <th style={{ width: '130px' }}>Status</th>
-                <th style={{ width: '140px' }}>Progress</th>
-                <th style={{ width: '100px' }}>Triggered</th>
-                <th style={{ width: '150px' }}>Actions</th>
+                <th style={{ width: '120px' }}>Status</th>
+                <th style={{ width: '120px' }}>Progress</th>
+                <th style={{ width: '80px' }}>Time</th>
+                <th style={{ width: '130px' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {jobs.map((job) => (
-                <JobRow key={job.id} job={job} onCopyText={onCopyText} />
+                <JobRow key={job.id} job={job} />
               ))}
             </tbody>
           </table>

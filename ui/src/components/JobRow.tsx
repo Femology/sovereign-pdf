@@ -1,174 +1,127 @@
-import React, { useState } from 'react';
-import { Download, FileText, Check, Copy, Eye, EyeOff } from 'lucide-react';
+import React from 'react';
+import { Download } from 'lucide-react';
 
 export interface Job {
   id: string;
   type: string;
   status: string;
-  input_paths: string[];
-  output_path?: string;
-  split_paths?: string[];
-  ocr_text?: string;
-  error?: string;
+  input_files: string[];
+  output_file?: string;
+  error_msg?: string;
+  metadata?: Record<string, string>;
   created_at: string;
-  updated_at: string;
-  options?: Record<string, any>;
+  completed_at?: string;
 }
 
 interface JobRowProps {
   job: Job;
-  onCopyText: (text: string) => void;
 }
 
-export const JobRow: React.FC<JobRowProps> = ({ job, onCopyText }) => {
-  const [showOcrText, setShowOcrText] = useState(false);
-  const [isCopied, setIsCopied] = useState(false);
+const TOOL_LABELS: Record<string, string> = {
+  merge: 'Merge PDF',
+  split: 'Split PDF',
+  compress: 'Compress PDF',
+  ocr: 'OCR Vision',
+  office_convert: 'Office to PDF',
+  reorder: 'Reorder Pages',
+  delete_pages: 'Delete Pages',
+  extract_pages: 'Extract Pages',
+  rotate: 'Rotate PDF',
+  repair: 'Repair PDF',
+  pdfa: 'PDF/A Archive',
+  pdf_to_images: 'PDF to Images',
+  extract_images: 'Extract Images',
+  pdf_to_text: 'PDF to Text',
+  watermark: 'Watermark',
+  page_numbers: 'Page Numbers',
+  crop: 'Crop PDF',
+  protect: 'Protect PDF',
+  unlock: 'Unlock PDF',
+  fill_form: 'Fill Form',
+  compare: 'Compare PDFs',
+};
 
-  const formatType = (type: string): string => {
-    switch (type) {
-      case 'merge': return 'PDF Merge';
-      case 'split': return 'PDF Split';
-      case 'compress': return 'PDF Compress';
-      case 'ocr': return 'OCR Vision';
-      case 'convert': return 'Office to PDF';
-      default: return type.toUpperCase();
+export const JobRow: React.FC<JobRowProps> = ({ job }) => {
+  const label = TOOL_LABELS[job.type] || job.type.replace(/_/g, ' ');
+
+  const getSourceLabel = (): string => {
+    if (job.type === 'merge' || job.type === 'compare') {
+      return `${job.input_files?.length || 0} file(s)`;
     }
-  };
-
-  const getSourceFileName = (paths: string[]): string => {
-    if (!paths || paths.length === 0) return 'Unknown File';
-    const path = paths[0];
-    const base = path.split('/').pop() || '';
-    // Format is {jobID}_{jobType}_in_{ext}
+    if (!job.input_files?.length) return 'Unknown';
+    const base = job.input_files[0].split('/').pop() || '';
     const parts = base.split('_in');
-    if (parts.length > 1) {
-       return 'Input' + parts[parts.length-1];
-    }
-    return base;
+    return parts.length > 1 ? `Input${parts[parts.length - 1]}` : base;
   };
 
-  const handleCopy = () => {
-    if (job.ocr_text) {
-      onCopyText(job.ocr_text);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
-    }
-  };
+  const isTextOutput =
+    job.type === 'pdf_to_text' ||
+    job.type === 'compare' ||
+    (job.type === 'ocr' && job.metadata?.format === 'txt');
 
-  const isOCRText = job.type === 'ocr' && (!job.options || job.options.format === 'txt');
+  const isZipOutput =
+    job.type === 'split' ||
+    job.type === 'pdf_to_images' ||
+    job.type === 'extract_images';
 
   return (
-    <>
-      <tr>
-        <td>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
-            #{job.id.substring(0, 8)}
-          </span>
-        </td>
-        <td>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <span style={{ fontWeight: 600 }}>{formatType(job.type)}</span>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-              {job.type === 'merge' ? `${job.input_paths.length} PDFs` : getSourceFileName(job.input_paths)}
-            </span>
+    <tr>
+      <td>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
+          #{job.id.substring(0, 8)}
+        </span>
+      </td>
+      <td>
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          <span style={{ fontWeight: 600 }}>{label}</span>
+          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{getSourceLabel()}</span>
+        </div>
+      </td>
+      <td>
+        <span className={`status-badge ${job.status}`}>
+          {job.status === 'processing' && <span className="dot green" />}
+          {job.status}
+        </span>
+      </td>
+      <td>
+        {job.status === 'processing' && (
+          <div className="progress-bar-container">
+            <div className="progress-bar-fill animated" />
           </div>
-        </td>
-        <td>
-          <span className={`status-badge ${job.status}`}>
-            {job.status === 'processing' && <span className="dot green"></span>}
-            {job.status}
-          </span>
-        </td>
-        <td>
-          {job.status === 'processing' && (
-            <div className="progress-bar-container">
-              <div className="progress-bar-fill animated" />
-            </div>
-          )}
-          {job.status === 'pending' && (
-            <div className="progress-bar-container">
-              <div className="progress-bar-fill" style={{ width: '0%' }} />
-            </div>
-          )}
-          {job.status === 'completed' && (
-            <div className="progress-bar-container">
-              <div className="progress-bar-fill" style={{ width: '100%' }} />
-            </div>
-          )}
-          {job.status === 'failed' && (
-            <span style={{ color: 'var(--accent-error)', fontSize: '11px' }} title={job.error}>
-              Error
-            </span>
-          )}
-        </td>
-        <td>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            {new Date(job.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-          </span>
-        </td>
-        <td>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {job.status === 'completed' && (
-              <>
-                {isOCRText ? (
-                  <button
-                    type="button"
-                    className="browse-btn"
-                    style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 12px', fontSize: '11px' }}
-                    onClick={() => setShowOcrText(!showOcrText)}
-                  >
-                    {showOcrText ? <EyeOff size={12} /> : <Eye size={12} />}
-                    {showOcrText ? 'Hide Text' : 'View Text'}
-                  </button>
-                ) : (
-                  <a
-                    href={`/api/download/${job.id}`}
-                    download
-                    className="download-btn"
-                    style={{ textDecoration: 'none' }}
-                  >
-                    <Download size={12} />
-                    Download
-                  </a>
-                )}
-              </>
-            )}
-            {job.status === 'failed' && (
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.error}>
-                {job.error}
-              </span>
-            )}
+        )}
+        {job.status === 'pending' && (
+          <div className="progress-bar-container">
+            <div className="progress-bar-fill" style={{ width: '0%' }} />
           </div>
-        </td>
-      </tr>
-      
-      {showOcrText && job.ocr_text && (
-        <tr>
-          <td colSpan={6} style={{ padding: '0 20px 20px 20px' }}>
-            <div className="ocr-result-container">
-              <div className="ocr-result-header">
-                <span style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <FileText size={14} className="text-teal" /> Extracted Text Layer
-                </span>
-                <button
-                  type="button"
-                  className="browse-btn"
-                  style={{ padding: '4px 10px', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '4px' }}
-                  onClick={handleCopy}
-                >
-                  {isCopied ? <Check size={12} className="text-teal" /> : <Copy size={12} />}
-                  {isCopied ? 'Copied' : 'Copy Text'}
-                </button>
-              </div>
-              <textarea
-                className="ocr-textarea"
-                readOnly
-                value={job.ocr_text}
-              />
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
+        )}
+        {job.status === 'completed' && (
+          <div className="progress-bar-container">
+            <div className="progress-bar-fill" style={{ width: '100%' }} />
+          </div>
+        )}
+        {job.status === 'failed' && (
+          <span className="error-text" title={job.error_msg}>
+            {job.error_msg || 'Failed'}
+          </span>
+        )}
+      </td>
+      <td>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          {new Date(job.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+        </span>
+      </td>
+      <td>
+        {job.status === 'completed' && (
+          <a
+            href={`/api/download/${job.id}`}
+            download
+            className="download-btn"
+          >
+            <Download size={12} />
+            {isTextOutput ? 'Download TXT' : isZipOutput ? 'Download ZIP' : 'Download'}
+          </a>
+        )}
+      </td>
+    </tr>
   );
 };
