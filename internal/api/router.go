@@ -15,6 +15,7 @@ var embeddedFiles embed.FS
 func SetupRouter(h *Handler, uiDistDir string) http.Handler {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/api/system/status", h.HandleSystemStatus)
 	mux.HandleFunc("/api/jobs/stream", h.HandleJobsStream)
 	mux.HandleFunc("/api/jobs/submit", h.HandleSubmit)
 	mux.HandleFunc("/api/jobs/", h.HandleJobs)

@@ -1,14 +1,66 @@
-import React, { useState, useEffect } from 'react';
-import { 
+import React, { useState, useEffect, useMemo } from 'react';
+import {
   Combine, Scissors, FileArchive, Eye, FileCheck2, ShieldCheck, HelpCircle,
-  ArrowRight, Key, Trash2, Replace, RefreshCw, Type, Image as ImageIcon, FileSignature, Files
+  ArrowRight, Key, Trash2, Replace, RefreshCw, Type, Image as ImageIcon,
+  FileSignature, Files, Search, Lock
 } from 'lucide-react';
 import { ToolCard } from './components/ToolCard';
 import { Dropzone } from './components/Dropzone';
 import { JobsTable } from './components/JobsTable';
 import type { Job } from './components/JobRow';
 
-export type ToolType = 'merge' | 'split' | 'compress' | 'ocr' | 'office_convert' | 'reorder' | 'delete_pages' | 'extract_pages' | 'rotate' | 'repair' | 'pdfa' | 'pdf_to_images' | 'extract_images' | 'pdf_to_text' | 'watermark' | 'page_numbers' | 'crop' | 'protect' | 'unlock' | 'fill_form' | 'compare';
+export type ToolType =
+  | 'merge' | 'split' | 'compress' | 'ocr' | 'office_convert'
+  | 'reorder' | 'delete_pages' | 'extract_pages' | 'rotate' | 'repair'
+  | 'pdfa' | 'pdf_to_images' | 'extract_images' | 'pdf_to_text'
+  | 'watermark' | 'page_numbers' | 'crop' | 'protect' | 'unlock'
+  | 'fill_form' | 'compare';
+
+interface ToolDef {
+  id: ToolType;
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+  section: string;
+}
+
+interface SystemTool {
+  name: string;
+  available: boolean;
+}
+
+const TOOLS: ToolDef[] = [
+  { id: 'merge', title: 'Merge', desc: 'Combine multiple PDFs', icon: <Combine size={18} />, section: 'Organize' },
+  { id: 'split', title: 'Split', desc: 'Split into pages', icon: <Scissors size={18} />, section: 'Organize' },
+  { id: 'reorder', title: 'Reorder', desc: 'Change page order', icon: <RefreshCw size={18} />, section: 'Organize' },
+  { id: 'delete_pages', title: 'Delete Pages', desc: 'Remove pages', icon: <Trash2 size={18} />, section: 'Organize' },
+  { id: 'extract_pages', title: 'Extract Pages', desc: 'Keep specific pages', icon: <Files size={18} />, section: 'Organize' },
+  { id: 'rotate', title: 'Rotate', desc: 'Rotate pages', icon: <RefreshCw size={18} />, section: 'Organize' },
+  { id: 'compress', title: 'Compress', desc: 'Reduce file size', icon: <FileArchive size={18} />, section: 'Optimize' },
+  { id: 'repair', title: 'Repair', desc: 'Fix broken PDFs', icon: <Replace size={18} />, section: 'Optimize' },
+  { id: 'pdfa', title: 'PDF/A', desc: 'Long-term archive', icon: <ShieldCheck size={18} />, section: 'Optimize' },
+  { id: 'office_convert', title: 'Office to PDF', desc: 'Word, Excel, PPT', icon: <FileCheck2 size={18} />, section: 'Convert' },
+  { id: 'pdf_to_images', title: 'PDF to Images', desc: 'Export as JPG/PNG', icon: <ImageIcon size={18} />, section: 'Convert' },
+  { id: 'extract_images', title: 'Extract Images', desc: 'Pull embedded images', icon: <ImageIcon size={18} />, section: 'Convert' },
+  { id: 'pdf_to_text', title: 'PDF to Text', desc: 'Extract plain text', icon: <Type size={18} />, section: 'Convert' },
+  { id: 'ocr', title: 'OCR Vision', desc: 'Make text searchable', icon: <Eye size={18} />, section: 'Edit & Security' },
+  { id: 'watermark', title: 'Watermark', desc: 'Stamp text overlay', icon: <Type size={18} />, section: 'Edit & Security' },
+  { id: 'page_numbers', title: 'Page Numbers', desc: 'Add numeration', icon: <Type size={18} />, section: 'Edit & Security' },
+  { id: 'crop', title: 'Crop', desc: 'Adjust margins', icon: <Scissors size={18} />, section: 'Edit & Security' },
+  { id: 'protect', title: 'Protect', desc: 'Password encrypt', icon: <Key size={18} />, section: 'Edit & Security' },
+  { id: 'unlock', title: 'Unlock', desc: 'Remove password', icon: <Lock size={18} />, section: 'Edit & Security' },
+  { id: 'fill_form', title: 'Fill Form', desc: 'Auto-fill fields', icon: <FileSignature size={18} />, section: 'Edit & Security' },
+  { id: 'compare', title: 'Compare', desc: 'Diff two PDFs', icon: <Eye size={18} />, section: 'Edit & Security' },
+];
+
+const TOOL_REQUIRES: Partial<Record<ToolType, string>> = {
+  compress: 'gs',
+  pdfa: 'gs',
+  ocr: 'tesseract',
+  office_convert: 'libreoffice',
+  pdf_to_text: 'pdftotext',
+  pdf_to_images: 'pdftoppm',
+};
 
 export const App: React.FC = () => {
   const [activeTool, setActiveTool] = useState<ToolType>('merge');
@@ -16,36 +68,40 @@ export const App: React.FC = () => {
   const [isUploading, setIsUploading] = useState(false);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [toast, setToast] = useState<string | null>(null);
-  
-  // Options state
   const [options, setOptions] = useState<Record<string, string>>({});
+  const [toolSearch, setToolSearch] = useState('');
+  const [systemTools, setSystemTools] = useState<SystemTool[]>([]);
+
+  useEffect(() => {
+    fetch('/api/system/status')
+      .then((r) => r.json())
+      .then((data) => setSystemTools(data.tools || []))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const eventSource = new EventSource('/api/jobs/stream');
-
     eventSource.onmessage = (event) => {
       try {
-        const parsedJobs = JSON.parse(event.data);
-        if (Array.isArray(parsedJobs)) {
-          setJobs(parsedJobs);
-        }
-      } catch (err) {
-        console.error('Failed to parse SSE payload', err);
+        const parsed = JSON.parse(event.data);
+        if (Array.isArray(parsed)) setJobs(parsed);
+      } catch {
+        /* ignore malformed SSE */
       }
     };
-
-    eventSource.onerror = (error) => {
-      console.error('SSE Error:', error);
-    };
-
-    return () => {
-      eventSource.close();
-    };
+    return () => eventSource.close();
   }, []);
 
   const showToast = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(null), 3000);
+  };
+
+  const isToolAvailable = (tool: ToolType): boolean => {
+    const required = TOOL_REQUIRES[tool];
+    if (!required) return true;
+    const found = systemTools.find((t) => t.name === required);
+    return found?.available ?? true;
   };
 
   const handleToolChange = (tool: ToolType) => {
@@ -56,72 +112,90 @@ export const App: React.FC = () => {
 
   const handleProcess = async () => {
     if (selectedFiles.length === 0) return;
-    
+    if (!isToolAvailable(activeTool)) {
+      showToast(`This tool requires ${TOOL_REQUIRES[activeTool]} — not installed on server`);
+      return;
+    }
+
     setIsUploading(true);
     const formData = new FormData();
     formData.append('job_type', activeTool);
     selectedFiles.forEach((file) => formData.append('files', file));
-    
-    // Add options to formData
-    Object.entries(options).forEach(([key, value]) => {
-      formData.append(key, value);
-    });
+    Object.entries(options).forEach(([key, value]) => formData.append(key, value));
 
     try {
-      const response = await fetch('/api/jobs/submit', {
-        method: 'POST',
-        body: formData,
-      });
-
+      const response = await fetch('/api/jobs/submit', { method: 'POST', body: formData });
       if (!response.ok) {
-        const err = await response.text();
-        throw new Error(err || response.statusText);
+        const err = await response.json().catch(() => ({ error: response.statusText }));
+        throw new Error(err.error || response.statusText);
       }
-
-      showToast(`Job queued successfully`);
+      showToast('Job queued — processing locally');
       setSelectedFiles([]);
       setOptions({});
-    } catch (err: any) {
-      alert(`Upload Failed: ${err.message}`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Upload failed';
+      showToast(msg);
     } finally {
       setIsUploading(false);
     }
   };
 
+  const filteredTools = useMemo(() => {
+    const q = toolSearch.toLowerCase().trim();
+    if (!q) return TOOLS;
+    return TOOLS.filter(
+      (t) => t.title.toLowerCase().includes(q) || t.desc.toLowerCase().includes(q)
+    );
+  }, [toolSearch]);
+
+  const sections = useMemo(() => {
+    const map = new Map<string, ToolDef[]>();
+    for (const t of filteredTools) {
+      if (!map.has(t.section)) map.set(t.section, []);
+      map.get(t.section)!.push(t);
+    }
+    return map;
+  }, [filteredTools]);
+
   const getToolMetadata = () => {
     switch (activeTool) {
-      case 'merge': return { title: 'Merge PDF', desc: 'Combine multiple PDFs into one.', accept: '.pdf', multiple: true };
-      case 'split': return { title: 'Split PDF', desc: 'Extract pages or split into multiple files.', accept: '.pdf', multiple: false };
-      case 'compress': return { title: 'Compress PDF', desc: 'Reduce file size while preserving quality.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'ocr': return { title: 'OCR PDF', desc: 'Make scanned PDFs searchable.', accept: '.pdf,.png,.jpg', multiple: false, hasOptions: true };
-      case 'office_convert': return { title: 'Office to PDF', desc: 'Convert Word, Excel, PPT to PDF.', accept: '.docx,.xlsx,.pptx,.txt', multiple: false };
-      case 'reorder': return { title: 'Reorder Pages', desc: 'Change page order (e.g. 3,1,2).', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'delete_pages': return { title: 'Delete Pages', desc: 'Remove specific pages from PDF.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'extract_pages': return { title: 'Extract Pages', desc: 'Extract specific pages into a new PDF.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'rotate': return { title: 'Rotate PDF', desc: 'Rotate pages by degrees (90, 180, 270).', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'repair': return { title: 'Repair PDF', desc: 'Fix corrupt or broken PDF files.', accept: '.pdf', multiple: false };
-      case 'pdfa': return { title: 'PDF/A Archive', desc: 'Convert to long-term PDF/A format.', accept: '.pdf', multiple: false };
-      case 'pdf_to_images': return { title: 'PDF to Images', desc: 'Convert PDF pages to JPG/PNG.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'extract_images': return { title: 'Extract Images', desc: 'Extract embedded images from PDF.', accept: '.pdf', multiple: false };
-      case 'pdf_to_text': return { title: 'PDF to Text', desc: 'Extract raw text from PDF.', accept: '.pdf', multiple: false };
-      case 'watermark': return { title: 'Add Watermark', desc: 'Stamp text or images onto PDF.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'page_numbers': return { title: 'Page Numbers', desc: 'Add page numbers to document.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'crop': return { title: 'Crop PDF', desc: 'Crop page margins by points.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'protect': return { title: 'Protect PDF', desc: 'Encrypt and password protect.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'unlock': return { title: 'Unlock PDF', desc: 'Remove password protection.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'fill_form': return { title: 'Fill Form', desc: 'Fill interactive PDF form fields.', accept: '.pdf', multiple: false, hasOptions: true };
-      case 'compare': return { title: 'Compare PDFs', desc: 'Compare two PDFs for text differences.', accept: '.pdf', multiple: true };
-      default: return { title: '', desc: '', accept: '', multiple: false };
+      case 'merge': return { title: 'Merge PDF', desc: 'Combine multiple PDF files into a single document.', accept: '.pdf', multiple: true };
+      case 'split': return { title: 'Split PDF', desc: 'Split a PDF into individual page files.', accept: '.pdf', multiple: false };
+      case 'compress': return { title: 'Compress PDF', desc: 'Reduce file size while preserving readability.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'ocr': return { title: 'OCR PDF', desc: 'Extract text or create a searchable PDF from scans.', accept: '.pdf,.png,.jpg,.jpeg,.tiff', multiple: false, hasOptions: true };
+      case 'office_convert': return { title: 'Office to PDF', desc: 'Convert Word, Excel, or PowerPoint documents.', accept: '.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt', multiple: false };
+      case 'reorder': return { title: 'Reorder Pages', desc: 'Rearrange pages (e.g. 3,1,2 for a 3-page doc).', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'delete_pages': return { title: 'Delete Pages', desc: 'Remove specific pages from your PDF.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'extract_pages': return { title: 'Extract Pages', desc: 'Create a new PDF from selected pages.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'rotate': return { title: 'Rotate PDF', desc: 'Rotate pages by 90°, 180°, or 270°.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'repair': return { title: 'Repair PDF', desc: 'Attempt to fix corrupt or broken PDF files.', accept: '.pdf', multiple: false };
+      case 'pdfa': return { title: 'PDF/A Archive', desc: 'Convert to long-term archival PDF/A format.', accept: '.pdf', multiple: false };
+      case 'pdf_to_images': return { title: 'PDF to Images', desc: 'Export each page as a JPG or PNG image.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'extract_images': return { title: 'Extract Images', desc: 'Pull embedded images out of a PDF.', accept: '.pdf', multiple: false };
+      case 'pdf_to_text': return { title: 'PDF to Text', desc: 'Extract raw text content from a PDF.', accept: '.pdf', multiple: false };
+      case 'watermark': return { title: 'Add Watermark', desc: 'Stamp text across your document pages.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'page_numbers': return { title: 'Page Numbers', desc: 'Add page numbers to your document.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'crop': return { title: 'Crop PDF', desc: 'Crop page margins in points (72 pt = 1 inch).', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'protect': return { title: 'Protect PDF', desc: 'Encrypt and password-protect your PDF.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'unlock': return { title: 'Unlock PDF', desc: 'Remove password protection from a PDF.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'fill_form': return { title: 'Fill Form', desc: 'Auto-fill interactive PDF form fields.', accept: '.pdf', multiple: false, hasOptions: true };
+      case 'compare': return { title: 'Compare PDFs', desc: 'Compare two PDFs and highlight text differences.', accept: '.pdf', multiple: true };
+      default: return { title: '', desc: '', accept: '.pdf', multiple: false };
     }
   };
 
   const metadata = getToolMetadata();
+  const toolReady = isToolAvailable(activeTool);
+  const missingDep = TOOL_REQUIRES[activeTool];
+
+  const setOpt = (key: string, value: string) =>
+    setOptions((prev) => ({ ...prev, [key]: value }));
 
   return (
     <div className="app-container">
       {toast && (
         <div className="toast">
-          <ShieldCheck size={16} style={{ color: 'var(--accent-teal)' }} />
+          <ShieldCheck size={16} style={{ color: 'var(--green-600)' }} />
           <span>{toast}</span>
         </div>
       )}
@@ -129,187 +203,181 @@ export const App: React.FC = () => {
       <header className="app-header">
         <div className="brand">
           <span className="brand-logo">Sovereign PDF</span>
-          <span className="brand-badge">pro</span>
+          <span className="brand-badge">local</span>
         </div>
         <div className="system-status">
+          <div className={`status-indicator ${toolReady ? '' : 'warn'}`}>
+            <span className={`dot ${toolReady ? 'green' : 'amber'}`} />
+            <span>{toolReady ? 'Engine Ready' : `${missingDep} not installed`}</span>
+          </div>
           <div className="status-indicator">
-            <span className="dot green"></span>
-            <span>Local Engine Active</span>
+            <ShieldCheck size={14} style={{ color: 'var(--green-600)' }} />
+            <span>100% Private — files never leave this machine</span>
           </div>
         </div>
       </header>
 
       <main className="app-workspace">
-        <aside className="tools-list" style={{ overflowY: 'auto', maxHeight: 'calc(100vh - 100px)' }}>
-          <h4 style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', marginBottom: '10px' }}>Organize</h4>
-          <ToolCard title="Merge" desc="Combine multiple files" icon={<Combine size={18}/>} active={activeTool==='merge'} onClick={()=>handleToolChange('merge')}/>
-          <ToolCard title="Split" desc="Extract pages" icon={<Scissors size={18}/>} active={activeTool==='split'} onClick={()=>handleToolChange('split')}/>
-          <ToolCard title="Reorder" desc="Change page order" icon={<RefreshCw size={18}/>} active={activeTool==='reorder'} onClick={()=>handleToolChange('reorder')}/>
-          <ToolCard title="Delete Pages" desc="Remove pages" icon={<Trash2 size={18}/>} active={activeTool==='delete_pages'} onClick={()=>handleToolChange('delete_pages')}/>
-          <ToolCard title="Extract Pages" desc="Keep specific pages" icon={<Files size={18}/>} active={activeTool==='extract_pages'} onClick={()=>handleToolChange('extract_pages')}/>
-          <ToolCard title="Rotate" desc="Rotate pages" icon={<RefreshCw size={18}/>} active={activeTool==='rotate'} onClick={()=>handleToolChange('rotate')}/>
-          
-          <h4 style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', margin: '15px 0 10px 0' }}>Optimize & Convert</h4>
-          <ToolCard title="Compress" desc="Reduce file size" icon={<FileArchive size={18}/>} active={activeTool==='compress'} onClick={()=>handleToolChange('compress')}/>
-          <ToolCard title="Repair" desc="Fix broken PDFs" icon={<Replace size={18}/>} active={activeTool==='repair'} onClick={()=>handleToolChange('repair')}/>
-          <ToolCard title="PDF/A" desc="Long-term archiving" icon={<ShieldCheck size={18}/>} active={activeTool==='pdfa'} onClick={()=>handleToolChange('pdfa')}/>
-          <ToolCard title="Office to PDF" desc="Word, Excel, PPT" icon={<FileCheck2 size={18}/>} active={activeTool==='office_convert'} onClick={()=>handleToolChange('office_convert')}/>
-          <ToolCard title="PDF to Images" desc="Convert to JPG/PNG" icon={<ImageIcon size={18}/>} active={activeTool==='pdf_to_images'} onClick={()=>handleToolChange('pdf_to_images')}/>
-          <ToolCard title="Extract Images" desc="Pull out images" icon={<ImageIcon size={18}/>} active={activeTool==='extract_images'} onClick={()=>handleToolChange('extract_images')}/>
-          <ToolCard title="PDF to Text" desc="Extract raw text" icon={<Type size={18}/>} active={activeTool==='pdf_to_text'} onClick={()=>handleToolChange('pdf_to_text')}/>
+        <aside className="tools-sidebar">
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              className="tool-search"
+              placeholder="Search tools…"
+              value={toolSearch}
+              onChange={(e) => setToolSearch(e.target.value)}
+              style={{ paddingLeft: 34 }}
+            />
+          </div>
 
-          <h4 style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', margin: '15px 0 10px 0' }}>Edit, Security & Data</h4>
-          <ToolCard title="OCR Vision" desc="Make text searchable" icon={<Eye size={18}/>} active={activeTool==='ocr'} onClick={()=>handleToolChange('ocr')}/>
-          <ToolCard title="Watermark" desc="Stamp text/image" icon={<Type size={18}/>} active={activeTool==='watermark'} onClick={()=>handleToolChange('watermark')}/>
-          <ToolCard title="Page Numbers" desc="Add numeration" icon={<Type size={18}/>} active={activeTool==='page_numbers'} onClick={()=>handleToolChange('page_numbers')}/>
-          <ToolCard title="Crop" desc="Adjust margins" icon={<Scissors size={18}/>} active={activeTool==='crop'} onClick={()=>handleToolChange('crop')}/>
-          <ToolCard title="Protect" desc="Add password" icon={<Key size={18}/>} active={activeTool==='protect'} onClick={()=>handleToolChange('protect')}/>
-          <ToolCard title="Unlock" desc="Remove password" icon={<Key size={18}/>} active={activeTool==='unlock'} onClick={()=>handleToolChange('unlock')}/>
-          <ToolCard title="Fill Form" desc="Automate fields" icon={<FileSignature size={18}/>} active={activeTool==='fill_form'} onClick={()=>handleToolChange('fill_form')}/>
-          <ToolCard title="Compare" desc="Text differences" icon={<Eye size={18}/>} active={activeTool==='compare'} onClick={()=>handleToolChange('compare')}/>
+          {Array.from(sections.entries()).map(([section, tools]) => (
+            <React.Fragment key={section}>
+              <div className="tools-section-label">{section}</div>
+              {tools.map((t) => (
+                <ToolCard
+                  key={t.id}
+                  title={t.title}
+                  desc={t.desc}
+                  icon={t.icon}
+                  active={activeTool === t.id}
+                  onClick={() => handleToolChange(t.id)}
+                />
+              ))}
+            </React.Fragment>
+          ))}
 
-          <div className="glass-panel" style={{ padding: '20px', marginTop: '12px', fontSize: '11px', color: 'var(--text-muted)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '8px' }}>
-              <HelpCircle size={14} /> Local Execution
-            </div>
-            100% private. Files never leave your local machine.
+          <div className="privacy-note">
+            <strong><HelpCircle size={14} /> Local Execution</strong>
+            All processing runs on your server. No cloud uploads, no third-party APIs.
           </div>
         </aside>
 
-        <section style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <section style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div className="glass-panel workspace-panel">
             <div className="panel-header">
               <h2 className="panel-title">{metadata.title}</h2>
               <p className="panel-desc">{metadata.desc}</p>
             </div>
-            
+
             <Dropzone
               accept={metadata.accept}
               multiple={metadata.multiple}
               onFilesSelected={setSelectedFiles}
-              onFileRemoved={(idx) => setSelectedFiles(selectedFiles.filter((_, i) => i !== idx))}
+              onFileRemoved={(idx) => setSelectedFiles((f) => f.filter((_, i) => i !== idx))}
               selectedFiles={selectedFiles}
             />
 
-            {(metadata as any).hasOptions && selectedFiles.length > 0 && (
-              <div className="options-panel" style={{ marginTop: '20px', padding: '15px', background: 'rgba(255,255,255,0.02)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                <h4 style={{ marginBottom: '10px', fontSize: '13px', color: 'var(--text-primary)' }}>Job Configuration</h4>
-                
+            {(metadata as { hasOptions?: boolean }).hasOptions && selectedFiles.length > 0 && (
+              <div className="options-panel">
+                <h4>Configuration</h4>
+
                 {activeTool === 'compress' && (
-                  <select onChange={(e) => setOptions({...options, profile: e.target.value})} style={inputStyle}>
-                    <option value="medium">Medium (Ebook)</option>
-                    <option value="low">Low (Screen)</option>
-                    <option value="high">High (Printer)</option>
+                  <select className="form-select" onChange={(e) => setOpt('profile', e.target.value)} defaultValue="medium">
+                    <option value="medium">Medium — Ebook quality</option>
+                    <option value="low">Low — Screen quality</option>
+                    <option value="high">High — Print quality</option>
                   </select>
                 )}
 
                 {activeTool === 'ocr' && (
-                  <select onChange={(e) => setOptions({...options, format: e.target.value})} style={inputStyle}>
+                  <select className="form-select" onChange={(e) => setOpt('format', e.target.value)} defaultValue="pdf">
                     <option value="pdf">Searchable PDF</option>
-                    <option value="txt">Extracted Text</option>
+                    <option value="txt">Plain text extraction</option>
                   </select>
                 )}
 
                 {activeTool === 'pdf_to_images' && (
                   <>
-                    <select onChange={(e) => setOptions({...options, format: e.target.value})} style={inputStyle}>
+                    <select className="form-select" onChange={(e) => setOpt('format', e.target.value)} defaultValue="png">
                       <option value="png">PNG</option>
                       <option value="jpg">JPEG</option>
                     </select>
-                    <input type="number" placeholder="DPI (e.g. 150)" onChange={(e) => setOptions({...options, dpi: e.target.value})} style={inputStyle} />
+                    <input className="form-input" type="number" placeholder="DPI (default 150)" onChange={(e) => setOpt('dpi', e.target.value)} />
                   </>
                 )}
 
-                {['reorder', 'delete_pages', 'extract_pages'].includes(activeTool) && (
-                  <input type="text" placeholder="Pages (e.g. 1,3,4-6)" onChange={(e) => setOptions({...options, pages: e.target.value})} style={inputStyle} />
+                {activeTool === 'reorder' && (
+                  <input className="form-input" type="text" placeholder="Page order, e.g. 3,1,2" onChange={(e) => setOpt('page_seq', e.target.value)} />
+                )}
+
+                {['delete_pages', 'extract_pages'].includes(activeTool) && (
+                  <input className="form-input" type="text" placeholder="Pages, e.g. 1,3,4-6" onChange={(e) => setOpt('pages', e.target.value)} />
                 )}
 
                 {activeTool === 'rotate' && (
                   <>
-                    <input type="number" placeholder="Degrees (90, 180, 270)" onChange={(e) => setOptions({...options, degrees: e.target.value})} style={inputStyle} />
-                    <input type="text" placeholder="Pages (optional)" onChange={(e) => setOptions({...options, pages: e.target.value})} style={inputStyle} />
+                    <select className="form-select" onChange={(e) => setOpt('degrees', e.target.value)} defaultValue="90">
+                      <option value="90">90° clockwise</option>
+                      <option value="180">180°</option>
+                      <option value="270">270° clockwise</option>
+                    </select>
+                    <input className="form-input" type="text" placeholder="Pages (optional, e.g. 1,3)" onChange={(e) => setOpt('pages', e.target.value)} />
                   </>
                 )}
 
                 {activeTool === 'watermark' && (
                   <>
-                    <input type="text" placeholder="Text to stamp" onChange={(e) => setOptions({...options, text: e.target.value})} style={inputStyle} />
-                    <input type="text" placeholder="Color (e.g. #FF0000)" onChange={(e) => setOptions({...options, color: e.target.value})} style={inputStyle} />
+                    <input className="form-input" type="text" placeholder="Watermark text" onChange={(e) => setOpt('text', e.target.value)} />
+                    <input className="form-input" type="text" placeholder="Color, e.g. #16a34a or 0.1 0.6 0.3" onChange={(e) => setOpt('color', e.target.value)} />
                   </>
                 )}
 
                 {activeTool === 'page_numbers' && (
                   <>
-                    <input type="text" placeholder="Format (e.g. Page %d)" onChange={(e) => setOptions({...options, format: e.target.value})} style={inputStyle} />
-                    <select onChange={(e) => setOptions({...options, position: e.target.value})} style={inputStyle}>
-                      <option value="bc">Bottom Center</option>
-                      <option value="tr">Top Right</option>
-                      <option value="bl">Bottom Left</option>
+                    <input className="form-input" type="text" placeholder="Format, e.g. Page %d" onChange={(e) => setOpt('format', e.target.value)} />
+                    <select className="form-select" onChange={(e) => setOpt('position', e.target.value)} defaultValue="bc">
+                      <option value="bc">Bottom center</option>
+                      <option value="bl">Bottom left</option>
+                      <option value="br">Bottom right</option>
+                      <option value="tc">Top center</option>
+                      <option value="tr">Top right</option>
                     </select>
                   </>
                 )}
 
                 {activeTool === 'crop' && (
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                    <input type="number" placeholder="Left pt" onChange={(e) => setOptions({...options, left: e.target.value})} style={inputStyle} />
-                    <input type="number" placeholder="Right pt" onChange={(e) => setOptions({...options, right: e.target.value})} style={inputStyle} />
-                    <input type="number" placeholder="Top pt" onChange={(e) => setOptions({...options, top: e.target.value})} style={inputStyle} />
-                    <input type="number" placeholder="Bottom pt" onChange={(e) => setOptions({...options, bottom: e.target.value})} style={inputStyle} />
+                  <div className="form-grid-2">
+                    <input className="form-input" type="number" placeholder="Left (pt)" onChange={(e) => setOpt('left', e.target.value)} />
+                    <input className="form-input" type="number" placeholder="Right (pt)" onChange={(e) => setOpt('right', e.target.value)} />
+                    <input className="form-input" type="number" placeholder="Top (pt)" onChange={(e) => setOpt('top', e.target.value)} />
+                    <input className="form-input" type="number" placeholder="Bottom (pt)" onChange={(e) => setOpt('bottom', e.target.value)} />
                   </div>
                 )}
 
                 {activeTool === 'protect' && (
-                  <input type="password" placeholder="User Password" onChange={(e) => setOptions({...options, user_password: e.target.value})} style={inputStyle} />
+                  <input className="form-input" type="password" placeholder="User password" onChange={(e) => setOpt('user_password', e.target.value)} />
                 )}
 
                 {activeTool === 'unlock' && (
-                  <input type="password" placeholder="Current Password" onChange={(e) => setOptions({...options, password: e.target.value})} style={inputStyle} />
-                )}
-                
-                {activeTool === 'fill_form' && (
-                  <input type="text" placeholder="Fields (e.g. name=John,age=30)" onChange={(e) => setOptions({...options, fields: e.target.value})} style={inputStyle} />
+                  <input className="form-input" type="password" placeholder="Current password" onChange={(e) => setOpt('password', e.target.value)} />
                 )}
 
+                {activeTool === 'fill_form' && (
+                  <input className="form-input" type="text" placeholder="Fields, e.g. name=John,email=test@example.com" onChange={(e) => setOpt('fields', e.target.value)} />
+                )}
               </div>
             )}
 
             <div className="panel-actions">
-              <button 
-                className="btn-primary" 
-                onClick={handleProcess} 
-                disabled={selectedFiles.length === 0 || isUploading}
-                style={{ width: '100%', padding: '16px' }}
+              <button
+                className="btn-primary"
+                onClick={handleProcess}
+                disabled={selectedFiles.length === 0 || isUploading || !toolReady}
               >
-                {isUploading ? (
-                  <span>Processing...</span>
-                ) : (
-                  <>
-                    Run Local Engine <ArrowRight size={16} />
-                  </>
+                {isUploading ? 'Processing…' : (
+                  <>Run {metadata.title} <ArrowRight size={16} /></>
                 )}
               </button>
             </div>
           </div>
 
-          <JobsTable jobs={jobs} loading={false} onCopyText={async (text) => { await navigator.clipboard.writeText(text); showToast('Copied to clipboard'); }} />
+          <JobsTable jobs={jobs} loading={false} />
         </section>
       </main>
 
       <footer className="app-footer">
-        © 2026 Sovereign PDF — Your Security, Your Documents, Your Infrastructure.<br/>
-        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>Powered by pdfcpu & Tesseract Vision Subsystems</span>
+        © 2026 Sovereign PDF — Your documents, your infrastructure, your privacy.
       </footer>
     </div>
   );
-};
-
-const inputStyle = {
-  width: '100%',
-  padding: '10px',
-  marginBottom: '10px',
-  background: 'rgba(0,0,0,0.2)',
-  border: '1px solid rgba(255,255,255,0.1)',
-  color: 'white',
-  borderRadius: '4px',
-  fontFamily: 'inherit'
 };

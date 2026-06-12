@@ -1,0 +1,5 @@
+storage/
+build/
+ui/node_modules/
+ui/dist/
+*.log

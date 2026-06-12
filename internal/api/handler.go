@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"sovereign-pdf/internal/engine"
+	"sovereign-pdf/internal/engine/ocr"
+	"sovereign-pdf/internal/engine/office"
+	"sovereign-pdf/internal/engine/pdf"
 	"sovereign-pdf/internal/worker"
 )
 
@@ -175,6 +178,32 @@ func (h *Handler) HandleSubmit(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, job)
 }
 
+// HandleSystemStatus: GET /api/system/status
+func (h *Handler) HandleSystemStatus(w http.ResponseWriter, r *http.Request) {
+	tools := pdf.ProbeTools()
+	_, tesseractOK := ocr.CheckTesseractVersion()
+	_, libreOfficeOK := office.CheckLibreOfficeVersion()
+
+	type toolStatus struct {
+		Name      string `json:"name"`
+		Available bool   `json:"available"`
+		Version   string `json:"version,omitempty"`
+	}
+	status := make([]toolStatus, 0, len(tools)+2)
+	for _, t := range tools {
+		status = append(status, toolStatus{Name: t.Tool, Available: t.Available, Version: t.Version})
+	}
+	tVer, _ := ocr.CheckTesseractVersion()
+	loVer, _ := office.CheckLibreOfficeVersion()
+	status = append(status, toolStatus{Name: "tesseract", Available: tesseractOK, Version: tVer})
+	status = append(status, toolStatus{Name: "libreoffice", Available: libreOfficeOK, Version: loVer})
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"status": "ok",
+		"tools":  status,
+	})
+}
+
 // Handle Jobs Stream: GET /api/jobs/stream
 func (h *Handler) HandleJobsStream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -271,24 +300,23 @@ func (h *Handler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if job.Type == engine.JobSplit {
-		h.serveSplitAsZip(w, job)
+	switch job.Type {
+	case engine.JobSplit, engine.JobPDFToImages, engine.JobExtractImages:
+		h.serveOutputDirAsZip(w, job, string(job.Type))
 		return
 	}
 
-	if job.Type == engine.JobOCR {
-		if strings.HasSuffix(job.OutputFile, ".txt") {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"ocr_%s.txt\"", id))
-			file, err := os.Open(job.OutputFile)
-			if err != nil {
-				writeError(w, http.StatusNotFound, "OCR Text not found on disk")
-				return
-			}
-			defer file.Close()
-			_, _ = io.Copy(w, file)
+	if strings.HasSuffix(job.OutputFile, ".txt") {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_%s.txt\"", job.Type, id))
+		file, err := os.Open(job.OutputFile)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "Text output not found on disk")
 			return
 		}
+		defer file.Close()
+		_, _ = io.Copy(w, file)
+		return
 	}
 
 	if job.OutputFile == "" {
@@ -310,14 +338,14 @@ func (h *Handler) HandleDownload(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, file)
 }
 
-func (h *Handler) serveSplitAsZip(w http.ResponseWriter, job *engine.Job) {
+func (h *Handler) serveOutputDirAsZip(w http.ResponseWriter, job *engine.Job, label string) {
 	if job.OutputFile == "" {
-		writeError(w, http.StatusInternalServerError, "No split directory available")
+		writeError(w, http.StatusInternalServerError, "No output directory available")
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"split_%s.zip\"", job.ID))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s_%s.zip\"", label, job.ID))
 
 	zipWriter := zip.NewWriter(w)
 	defer zipWriter.Close()

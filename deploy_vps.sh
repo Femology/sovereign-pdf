@@ -23,6 +23,7 @@ apt-get install -y \
     tesseract-ocr \
     libreoffice \
     poppler-utils \
+    ghostscript \
     nginx \
     ufw \
     curl

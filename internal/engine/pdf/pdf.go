@@ -398,7 +398,7 @@ func (e *GoPDFEngine) Watermark(ctx context.Context, inputPath, outputPath strin
 		pages = strings.Split(opts.Pages, ",")
 	}
 	if opts.Text != "" {
-		desc := fmt.Sprintf("font:Helvetica, points:24, col:%s, rot:%.0f, sc:%.2f, op:%.2f",
+		desc := fmt.Sprintf("fontname:Helvetica, points:24, color:%s, rotation:%.0f, scalefactor:%.2f, opacity:%.2f",
 			colourOrDefault(opts.Color, "0.5 0.5 0.5"),
 			opts.Rotation,
 			scaleOrDefault(opts.Scale),
@@ -424,7 +424,7 @@ func (e *GoPDFEngine) Watermark(ctx context.Context, inputPath, outputPath strin
 		}
 	}
 	if opts.ImagePath != "" {
-		desc := fmt.Sprintf("rot:%.0f, sc:%.2f, op:%.2f", opts.Rotation, scaleOrDefault(opts.Scale), opacityOrDefault(opts.Opacity))
+		desc := fmt.Sprintf("rotation:%.0f, scalefactor:%.2f, opacity:%.2f", opts.Rotation, scaleOrDefault(opts.Scale), opacityOrDefault(opts.Opacity))
 		ch := make(chan error, 1)
 		go func() {
 			wm, err := pdfcpuapi.ImageWatermark(opts.ImagePath, desc, true, false, types.POINTS)
@@ -447,11 +447,32 @@ func (e *GoPDFEngine) Watermark(ctx context.Context, inputPath, outputPath strin
 	return fmt.Errorf("watermark: either Text or ImagePath must be provided")
 }
 
+// normalizeColor converts hex (#RRGGBB) or rgb() values to pdfcpu's "R G B" format (0–1 floats).
+func normalizeColor(c string) string {
+	c = strings.TrimSpace(c)
+	if c == "" {
+		return "0.5 0.5 0.5"
+	}
+	if strings.HasPrefix(c, "#") {
+		hex := strings.TrimPrefix(c, "#")
+		if len(hex) == 3 {
+			hex = string([]byte{hex[0], hex[0], hex[1], hex[1], hex[2], hex[2]})
+		}
+		if len(hex) == 6 {
+			var r, g, b int
+			if _, err := fmt.Sscanf(hex, "%02x%02x%02x", &r, &g, &b); err == nil {
+				return fmt.Sprintf("%.3f %.3f %.3f", float64(r)/255, float64(g)/255, float64(b)/255)
+			}
+		}
+	}
+	return c
+}
+
 func colourOrDefault(c, def string) string {
 	if c == "" {
 		return def
 	}
-	return c
+	return normalizeColor(c)
 }
 
 func scaleOrDefault(s float64) float64 {
@@ -485,7 +506,7 @@ func (e *GoPDFEngine) AddPageNumbers(ctx context.Context, inputPath, outputPath 
 	if position == "" {
 		position = "bc"
 	}
-	desc := fmt.Sprintf("font:Helvetica, points:%d, pos:%s, off:0 %d",
+	desc := fmt.Sprintf("fontname:Helvetica, points:%d, position:%s, offset:0 %d",
 		fontSize, position, opts.Margin)
 
 	var pages []string
