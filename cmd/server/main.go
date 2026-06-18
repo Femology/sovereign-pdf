@@ -82,6 +82,11 @@ func main() {
 	workerPool := worker.NewWorkerPool(jobQueue, jobStore, pdfEngine, ocrEngine, officeEngine, *workers)
 	workerPool.Start()
 
+	// Start TTL reaper to clean up stale output files after 1 hour
+	reaperCtx, reaperCancel := context.WithCancel(context.Background())
+	defer reaperCancel()
+	go worker.StartTTLReaper(reaperCtx, jobStore, 1*time.Hour)
+
 	// 4. Setup API router
 	// Check UI build directory
 	uiDist := "./ui/dist"
