@@ -27,11 +27,30 @@ type ProbeResult struct {
 	Version   string
 }
 
+// toolVersionFlag maps binary names to the flag that prints their version.
+// Poppler tools (pdftotext, pdftoppm, pdfunite) use -v; others use --version.
+var toolVersionFlag = map[string]string{
+	"pdftoppm":  "-v",
+	"pdfunite":  "-v",
+	"pdftotext": "-v",
+}
+
 func ProbeTools() []ProbeResult {
 	tools := []string{"pdfcpu", "gs", "pdftoppm", "pdfunite", "pdftotext"}
 	results := make([]ProbeResult, 0, len(tools))
 	for _, t := range tools {
-		out, err := exec.Command(t, "--version").CombinedOutput()
+		// First check whether the binary is reachable at all.
+		path, lookErr := exec.LookPath(t)
+		if lookErr != nil {
+			results = append(results, ProbeResult{Tool: t, Available: false})
+			continue
+		}
+		_ = path
+		flag := "--version"
+		if f, ok := toolVersionFlag[t]; ok {
+			flag = f
+		}
+		out, err := exec.Command(t, flag).CombinedOutput()
 		version := strings.TrimSpace(strings.Split(string(out), "\n")[0])
 		results = append(results, ProbeResult{
 			Tool:      t,
@@ -319,7 +338,7 @@ func (e *GoPDFEngine) ToImages(ctx context.Context, inputPath, outputDir string,
 		return nil, fmt.Errorf("mkdir: %w", err)
 	}
 	prefix := filepath.Join(outputDir, "page")
-	args := []string{fmt.Sprintf("-r%d", dpi)}
+	args := []string{"-r", fmt.Sprintf("%d", dpi)}
 	switch format {
 	case engine.ImageFormatJPEG:
 		args = append(args, "-jpeg")

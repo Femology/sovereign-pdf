@@ -150,9 +150,14 @@ func (p *WorkerPool) workerLoop() {
 
 		// Security
 		case engine.JobProtect:
+			userPW := meta["user_password"]
+			ownerPW := meta["owner_password"]
+			if ownerPW == "" {
+				ownerPW = userPW
+			}
 			opts := engine.ProtectOptions{
-				UserPassword:  meta["user_password"],
-				OwnerPassword: meta["owner_password"],
+				UserPassword:  userPW,
+				OwnerPassword: ownerPW,
 			}
 			err = p.pdf.Protect(ctx, job.InputFiles[0], job.OutputFile, opts)
 		case engine.JobUnlock:

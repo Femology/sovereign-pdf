@@ -60,6 +60,7 @@ const TOOL_REQUIRES: Partial<Record<ToolType, string>> = {
   office_convert: 'libreoffice',
   pdf_to_text: 'pdftotext',
   pdf_to_images: 'pdftoppm',
+  compare: 'pdftotext',
 };
 
 export const App: React.FC = () => {

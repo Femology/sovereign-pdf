@@ -19,6 +19,7 @@ func SetupRouter(h *Handler, uiDistDir string) http.Handler {
 	mux.HandleFunc("/api/jobs/stream", h.HandleJobsStream)
 	mux.HandleFunc("/api/jobs/submit", h.HandleSubmit)
 	mux.HandleFunc("/api/jobs/", h.HandleJobs)
+	mux.HandleFunc("/api/jobs", h.HandleJobs)
 	mux.HandleFunc("/api/download/", h.HandleDownload)
 
 	// Try embedded static assets first (production binary)
